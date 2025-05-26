@@ -1,0 +1,21 @@
+{
+    "solutionName": "dynamic-image-transformation-for-amazon-cloudfront",
+    "maintainer": "AWS",
+    "author": "Amazon Web Services",
+    "license": "Apache-2.0",
+    "buildDateUtc": "",
+    "sourceCodeUrl": "https://github.com/aws-solutions/dynamic-image-transformation-for-amazon-cloudfront",
+    "solutionVersion": "",
+    "bucketNamePrefix": "image-transformation-solution",
+    "deploymentParameters": {
+        "enableDynamoDB": true,
+        "enableS3Integration": true,
+        "enableCORS": true,
+        "corsOrigin": "*"
+    },
+    "configurations": {
+        "sourceBuckets": [],
+        "deployRegion": "us-east-1",
+        "metadataTableName": "ImageMetadata"
+    }
+}

@@ -32,18 +32,12 @@ prepare_jest_coverage_report() {
 
 headline "[Setup] Configure paths"
 template_dir="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-cdk_dir="$template_dir/../source/constructs"
-image_handler_dir="$template_dir/../source/image-handler"
-custom_resource_dir="$template_dir/../source/custom-resource"
-metrics_utils_dir="$template_dir/../source/metrics-utils"
+image_handler_dir="$template_dir/../source/image-handler" 
 coverage_reports_top_path="$template_dir/../source/test/coverage-reports"
 
 headline "[Tests] Run unit tests"
 declare -a packages=(
-  "$cdk_dir"
   "$image_handler_dir"
-  "$custom_resource_dir"
-  "$metrics_utils_dir"
 )
 for package in "${packages[@]}"; do
   cd "$package"

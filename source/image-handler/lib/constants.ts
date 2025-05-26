@@ -1,6 +1,18 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+// Environment variable names for S3 and DynamoDB configuration
+export const ENV_VARS = {
+  SOURCE_BUCKETS: "SOURCE_BUCKETS",
+  OUTPUT_BUCKET: "OUTPUT_BUCKET_NAME",
+  METADATA_TABLE: "METADATA_TABLE_NAME",
+  ENABLE_CACHE: "ENABLE_CACHE",
+  ENABLE_METRICS: "ENABLE_METRICS",
+  CORS_ENABLED: "CORS_ENABLED",
+  CORS_ORIGIN: "CORS_ORIGIN",
+  DEFAULT_FALLBACK_IMAGE: "DEFAULT_FALLBACK_IMAGE_KEY"
+};
+
 export const ALTERNATE_EDIT_ALLOWLIST_ARRAY = [
   "overlayWith",
   "smartCrop",

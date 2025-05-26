@@ -1,9 +1,9 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import Rekognition from "aws-sdk/clients/rekognition";
 import S3, { WriteGetObjectResponseRequest } from "aws-sdk/clients/s3";
 import SecretsManager from "aws-sdk/clients/secretsmanager";
+import DynamoDB from "aws-sdk/clients/dynamodb";
 
 import { getOptions } from "../solution-utils/get-options";
 import { isNullOrWhiteSpace } from "../solution-utils/helpers";
@@ -20,21 +20,25 @@ import {
   RequestTypes,
   StatusCodes,
 } from "./lib";
-import { SecretProvider } from "./secret-provider";
 // eslint-disable-next-line import/no-unresolved
 import { Context } from "aws-lambda";
+import { SecretProvider } from "./secret-provider";
 
 const awsSdkOptions = getOptions();
 const s3Client = new S3(awsSdkOptions);
-const rekognitionClient = new Rekognition(awsSdkOptions);
 const secretsManagerClient = new SecretsManager(awsSdkOptions);
 const secretProvider = new SecretProvider(secretsManagerClient);
+const dynamoDbClient = new DynamoDB.DocumentClient(awsSdkOptions);
 
 const LAMBDA_PAYLOAD_LIMIT = 6 * 1024 * 1024;
+const IMAGE_METADATA_TABLE = process.env.IMAGE_METADATA_TABLE || "image-metadata";
+const ENABLE_WATERMARK = process.env.ENABLE_WATERMARK === "Yes";
+const WATERMARK_TEXT = process.env.WATERMARK_TEXT || "© Copyright";
+const IMAGE_FORMATS = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".tiff", ".svg"];
 
 /**
  * Image handler Lambda handler.
- * @param event The image handler request event.
+ * @param event The image handler request event or S3 event.
  * @param context The request context
  * @returns Processed request response.
  */
@@ -42,6 +46,18 @@ export async function handler(
   event: ImageHandlerEvent | S3Event,
   context: Context = undefined
 ): Promise<void | ImageHandlerExecutionResult | S3HeadObjectResult> {
+  // Check if the event is an S3 event (from bucket upload)
+  if (isS3Event(event)) {
+    console.info("Received S3 event:", JSON.stringify(event));
+    try {
+      return await handleS3Event(event);
+    } catch (error) {
+      console.error("Error processing S3 event:", error);
+      throw error; // Rethrow to trigger Lambda retry
+    }
+  }
+
+  // If not an S3 event, process as a direct API request
   const { ENABLE_S3_OBJECT_LAMBDA } = process.env;
 
   const normalizedEvent = normalizeEvent(event, ENABLE_S3_OBJECT_LAMBDA);
@@ -90,6 +106,293 @@ export async function handler(
 }
 
 /**
+ * Handles S3 events from uploaded images
+ * @param event The S3 event containing bucket and object information
+ */
+async function handleS3Event(event: S3Event): Promise<void> {
+  const { OUTPUT_BUCKET } = process.env;
+
+  if (!OUTPUT_BUCKET) {
+    console.error("OUTPUT_BUCKET environment variable not set");
+    throw new Error("OUTPUT_BUCKET environment variable not set");
+  }
+
+  for (const record of event.Records) {
+    try {
+      const startTime = Date.now();
+      const bucket = record.s3.bucket.name;
+      const key = decodeURIComponent(record.s3.object.key.replace(/\+/g, " "));
+
+      // Check if file is in the allowed uploads directory
+      if (!key.startsWith('uploads/')) {
+        console.info(`Skipping processing for ${key} - not in uploads directory`);
+        continue;
+      }
+
+      // Check if file has an image extension
+      const fileExtension = key.substring(key.lastIndexOf('.')).toLowerCase();
+      if (!IMAGE_FORMATS.includes(fileExtension)) {
+        console.info(`Skipping processing for ${key} - not a supported image format`);
+        continue;
+      }
+
+      console.info(`Processing image from ${bucket}/${key}`);
+
+      try {
+        // Get the image from the source bucket
+        const imageObject = await s3Client
+          .getObject({ Bucket: bucket, Key: key })
+          .promise();
+
+        const imageBuffer = Buffer.from(imageObject.Body as Buffer);
+        const contentType = imageObject.ContentType || getContentTypeFromExtension(fileExtension);
+
+        // Create image processing request
+        const imageRequest = new ImageRequest(s3Client, secretProvider);
+        const imageHandler = new ImageHandler(s3Client);
+
+        // Generate a unique ID for grouping related transformations
+        const processingId = generateUniqueId();
+
+        // Extract original filename components
+        const fileNameParts = key.split('/').pop().split('.');
+        const fileExt = fileNameParts.pop();
+        const fileName = fileNameParts.join('.');
+
+        // Standard transformations - resize to different sizes
+        const transformations = [
+          { width: 100, height: 100, suffix: 'thumb', quality: 80 },
+          { width: 500, height: 500, suffix: 'medium', quality: 85 },
+          { width: 1024, height: 1024, suffix: 'large', quality: 90 },
+          { width: 1920, height: 1080, suffix: 'banner', fit: 'inside', quality: 90 }
+        ];
+
+        // Apply watermark to larger images if enabled
+        if (ENABLE_WATERMARK) {
+          transformations.push(
+            {
+              width: 2048,
+              height: 2048,
+              suffix: 'watermarked',
+              fit: 'inside',
+              quality: 95,
+              watermark: {
+                text: WATERMARK_TEXT,
+                opacity: 0.5,
+                position: 'bottom-right'
+              }
+            }
+          );
+        }
+
+        const processingResults = [];
+
+        // Process each transformation
+        for (const transform of transformations) {
+          const outputFormat = getOutputFormat(contentType, transform);
+
+          const requestInfo = {
+            bucket,
+            key,
+            edits: {
+              resize: {
+                width: transform.width,
+                height: transform.height,
+                fit: transform.fit || 'cover'
+              },
+              toFormat: outputFormat,
+              flatten: outputFormat === 'jpeg' ? { background: '#ffffff' } : undefined,
+              compress: true,
+              withMetadata: false
+            },
+            outputFormat,
+            originalImage: imageBuffer,
+            contentType
+          };
+
+          // Add watermark if specified in this transformation
+          if (transform.watermark) {
+            requestInfo.edits.watermark = transform.watermark;
+          }
+
+          // Add quality settings if specified
+          if (transform.quality) {
+            if (outputFormat === 'jpeg' || outputFormat === 'jpg') {
+              requestInfo.edits.jpeg = { quality: transform.quality };
+            } else if (outputFormat === 'png') {
+              requestInfo.edits.png = { quality: transform.quality };
+            } else if (outputFormat === 'webp') {
+              requestInfo.edits.webp = { quality: transform.quality };
+            }
+          }
+
+          try {
+            // Process the image
+            console.info(`Applying ${transform.suffix} transformation`);
+            const processedImage = await imageHandler.process(requestInfo);
+
+            // Create the output key with size suffix
+            const outputKey = `processed/${fileName}-${transform.suffix}.${outputFormat}`;
+
+            // Save to destination bucket
+            await s3Client.putObject({
+              Bucket: OUTPUT_BUCKET,
+              Key: outputKey,
+              Body: processedImage,
+              ContentType: `image/${outputFormat}`,
+              Metadata: {
+                'original-bucket': bucket,
+                'original-key': key,
+                'transformation': JSON.stringify(transform),
+                'processing-id': processingId
+              },
+              // Add cache control and content disposition headers
+              CacheControl: 'public, max-age=31536000',
+              ContentDisposition: `inline; filename="${fileName}-${transform.suffix}.${outputFormat}"`
+            }).promise();
+
+            const outputUrl = `https://${OUTPUT_BUCKET}.s3.${awsSdkOptions.region || 'us-east-1'}.amazonaws.com/${outputKey}`;
+            console.info(`Saved processed image to ${outputUrl}`);
+
+            processingResults.push({
+              transformType: transform.suffix,
+              outputKey,
+              outputFormat,
+              outputUrl,
+              width: transform.width,
+              height: transform.height,
+              status: 'success'
+            });
+          } catch (transformError) {
+            console.error(`Error processing transformation ${transform.suffix} for ${key}:`, transformError);
+            processingResults.push({
+              transformType: transform.suffix,
+              status: 'error',
+              errorMessage: transformError.message || 'Unknown error during transformation'
+            });
+          }
+        }
+
+        // Store metadata in DynamoDB if the table exists
+        try {
+          const metadata = {
+            id: processingId,
+            originalFileName: fileName,
+            originalBucket: bucket,
+            originalKey: key,
+            originalFormat: fileExt,
+            originalContentType: contentType,
+            processedBucket: OUTPUT_BUCKET,
+            processingResults: processingResults,
+            processingTimeMs: Date.now() - startTime,
+            createdAt: new Date().toISOString(),
+            status: 'completed'
+          };
+
+          await dynamoDbClient.put({
+            TableName: IMAGE_METADATA_TABLE,
+            Item: metadata
+          }).promise();
+
+          console.info(`Stored metadata in DynamoDB with ID ${processingId}`);
+        } catch (dbError) {
+          console.warn('DynamoDB storage failed, continuing without metadata storage', dbError);
+        }
+      } catch (processingError) {
+        console.error(`Error processing image ${bucket}/${key}:`, processingError);
+
+        // Store error information in DynamoDB if possible
+        try {
+          if (IMAGE_METADATA_TABLE) {
+            const errorMetadata = {
+              id: generateUniqueId(),
+              originalBucket: bucket,
+              originalKey: key,
+              errorMessage: processingError.message || 'Unknown error',
+              errorStack: processingError.stack,
+              createdAt: new Date().toISOString(),
+              status: 'error'
+            };
+
+            await dynamoDbClient.put({
+              TableName: IMAGE_METADATA_TABLE,
+              Item: errorMetadata
+            }).promise();
+          }
+        } catch (metadataError) {
+          console.error('Failed to store error metadata:', metadataError);
+        }
+        // Continue to the next record rather than failing the entire batch
+      }
+    } catch (recordError) {
+      console.error(`Error handling S3 event record:`, recordError);
+      // Continue to the next record rather than failing the entire batch
+    }
+  }
+}
+
+/**
+ * Generate a unique ID for image processing batch
+ */
+function generateUniqueId(): string {
+  return `img_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+}
+
+/**
+ * Get appropriate content type from file extension
+ */
+function getContentTypeFromExtension(extension: string): string {
+  const extensionToContentType = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.tiff': 'image/tiff',
+    '.svg': 'image/svg+xml'
+  };
+
+  return extensionToContentType[extension] || 'application/octet-stream';
+}
+
+/**
+ * Determine the best output format based on input and transformation
+ */
+function getOutputFormat(contentType: string, transform: any): string {
+  // Honor specific output format if defined in the transformation
+  if (transform.outputFormat) {
+    return transform.outputFormat;
+  }
+
+  // For thumbnails, always use WebP for better compression if not Safari
+  if (transform.suffix === 'thumb') {
+    return 'webp';
+  }
+
+  // Otherwise maintain original format for compatibility
+  if (contentType.includes('jpeg') || contentType.includes('jpg')) {
+    return 'jpeg';
+  } else if (contentType.includes('png')) {
+    return 'png';
+  } else if (contentType.includes('webp')) {
+    return 'webp';
+  } else if (contentType.includes('gif')) {
+    return 'gif';
+  }
+
+  // Default to JPEG
+  return 'jpeg';
+}
+
+/**
+ * Determines if the event is an S3 event
+ */
+function isS3Event(event: any): event is S3Event {
+  return event && event.Records && Array.isArray(event.Records) &&
+    event.Records.length > 0 && event.Records[0].eventSource === 'aws:s3';
+}
+
+/**
  * Image handler request handler.
  * @param event The normalized request event.
  * @returns Processed request response.
@@ -98,7 +401,7 @@ async function handleRequest(event: ImageHandlerEvent): Promise<ImageHandlerExec
   const { ENABLE_S3_OBJECT_LAMBDA } = process.env;
 
   const imageRequest = new ImageRequest(s3Client, secretProvider);
-  const imageHandler = new ImageHandler(s3Client, rekognitionClient);
+  const imageHandler = new ImageHandler(s3Client);
   const isAlb = event.requestContext && Object.prototype.hasOwnProperty.call(event.requestContext, "elb");
   try {
     const imageRequestInfo = await imageRequest.setup(event);
@@ -285,7 +588,7 @@ export async function handleDefaultFallbackImage(
   headers["Last-Modified"] = defaultFallbackImage.LastModified;
   try {
     headers["Cache-Control"] = imageRequest.parseImageHeaders(event, RequestTypes.DEFAULT)?.["Cache-Control"];
-  } catch {}
+  } catch { }
 
   // Prioritize Cache-Control header attached to the fallback image followed by Cache-Control header provided in request, followed by the default
   headers["Cache-Control"] = defaultFallbackImage.CacheControl ?? headers["Cache-Control"] ?? "max-age=31536000,public";

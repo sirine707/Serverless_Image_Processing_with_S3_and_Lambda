@@ -86,17 +86,30 @@ export interface ImageRequestInfo {
   secondsToExpiry?: number;
 }
 
-export interface RekognitionCompatibleImage {
-  imageBuffer: {
-    data: Buffer;
-    info: sharp.OutputInfo;
-  };
-  format: keyof sharp.FormatEnum;
-}
-
 export interface ImageHandlerExecutionResult {
   statusCode: StatusCodes;
   isBase64Encoded: boolean;
   headers: Headers;
   body: Buffer | string;
+}
+
+export interface ImageMetadata {
+  imageId: string;
+  bucketName: string;
+  key: string;
+  format?: string;
+  width?: number;
+  height?: number;
+  size?: number;
+  contentType?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  processingStatus?: 'pending' | 'processed' | 'failed';
+  processingError?: string;
+  edits?: Record<string, any>;
+  requestedEdits?: ImageEdits;
+  originalEtag?: string;
+  accessCount?: number;
+  lastAccessed?: string;
+  customMetadata?: Record<string, any>;
 }

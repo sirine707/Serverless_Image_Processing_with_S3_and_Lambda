@@ -1,130 +1,289 @@
-**[Dynamic Image Transformation for Amazon CloudFront](https://aws.amazon.com/solutions/implementations/dynamic-image-transformation-for-amazon-cloudfront/)** | **[🚧 Feature request](https://github.com/aws-solutions/serverless-image-handler/issues/new?assignees=&labels=enhancement&template=feature_request.md&title=)** | **[🐛 Bug Report](https://github.com/aws-solutions/serverless-image-handler/issues/new?assignees=&labels=bug&template=bug_report.md&title=)** | **[❓ General Question](https://github.com/aws-solutions/serverless-image-handler/issues/new?assignees=&labels=question&template=general_question.md&title=)**
+# Serverless Image Processing with S3 and Lambda
 
-**Note**: If you want to use the solution without building from source, navigate to [Solution Landing Page](https://aws.amazon.com/solutions/implementations/dynamic-image-transformation-for-amazon-cloudfront/).
+A serverless solution for automatic image processing using AWS services. This project allows users to upload images to an S3 bucket, triggering Lambda functions that process the images (resize, watermark, etc.) and store the processed versions in another S3 bucket.
 
-## Table of Content
+**Architecture**: Serverless
 
-- [Solution Overview](#solution-overview)
-- [Architecture Diagram](#architecture-diagram)
-- [AWS CDK and Solutions Constructs](#aws-cdk-and-solutions-constructs)
-- [Customizing the Solution](#customizing-the-solution)
-  - [Prerequisites for Customization](#prerequisites-for-customization)
-    - [1. Clone the repository](#1-clone-the-repository)
-    - [2. Unit Test](#2-unit-test)
-    - [3. Build & Deploy](#3-build-and-deploy)
-- [Collection of operational metrics](#collection-of-operational-metrics)
-- [External Contributors](#external-contributors)
+## Table of Contents
+
+- [Architecture](#architecture)
+- [Features](#features)
+- [Prerequisites](#prerequisites)
+- [Deployment](#deployment)
+- [Usage](#usage)
+- [Available Image Transformations](#available-image-transformations)
+- [Utility Classes](#utility-classes)
+- [Customization](#customization)
+- [Monitoring and Logs](#monitoring-and-logs)
+- [Troubleshooting](#troubleshooting)
+- [Cleanup](#cleanup)
+- [Security Considerations](#security-considerations)
+- [Learning Outcomes](#learning-outcomes)
 - [License](#license)
 
-# Solution Overview
+## Architecture
 
-The Dynamic Image Transformation for Amazon CloudFront solution helps to embed images on websites and mobile applications to drive user engagement. It uses [Sharp](https://sharp.pixelplumbing.com/en/stable/) to provide high-speed image processing without sacrificing image quality. To minimize costs of image optimization, manipulation, and processing, this solution automates version control and provides flexible storage and compute options for file reprocessing.
+![Serverless Architecture](architecture.png)
 
-This solution automatically deploys and configures a serverless architecture optimized for dynamic image manipulation. Images can be rendered and returned spontaneously. For example, an image can be resized based on different screen sizes by adding code on a website that leverages this solution to resize the image before being sent to the screen using the image. It uses [Amazon CloudFront](https://aws.amazon.com/cloudfront) for global content delivery and [Amazon Simple Storage Service](https://aws.amazon.com/s3) (Amazon S3) for reliable and durable cloud storage.
+This solution uses the following AWS services:
 
-For more information and a detailed deployment guide, visit the [Dynamic Image Transformation for Amazon CloudFront](https://aws.amazon.com/solutions/implementations/dynamic-image-transformation-for-amazon-cloudfront/) solution page.
+- **Amazon S3**: Stores both original and processed images
+- **AWS Lambda**: Executes image processing when new images are uploaded
+- **Amazon API Gateway**: (Optional) Provides a REST API for uploads and transformations
+- **Amazon DynamoDB**: (Optional) Stores metadata about uploaded images
 
-# Architecture Diagram
+## Features
 
-Dynamic Image Transformation for Amazon CloudFront supports two architectures, one using an Amazon API Gateway REST API, and another using S3 Object Lambda. The Amazon API Gateway REST API architecture maintains the structure used in v6.3.3 and below of the Dynamic Image Transformation for Amazon CloudFront. The S3 Object Lambda architecture maintains very similar functionality, while also allowing for images larger than 6 MB to be returned. For more information, refer to the [Architecture Overview](https://docs.aws.amazon.com/solutions/latest/serverless-image-handler/architecture-overview.html) in the implementation guide.
-
-The AWS CloudFormation template deploys an Amazon CloudFront distribution, Amazon API Gateway REST API/S3 Object Lambda, and an AWS Lambda function. Amazon CloudFront provides a caching layer to reduce the cost of image processing and the latency of subsequent image delivery. The Amazon API Gateway/S3 Object Lambda provides endpoint resources and triggers the AWS Lambda function. The AWS Lambda function retrieves the image from the customer's Amazon Simple Storage Service (Amazon S3) bucket and uses Sharp to return a modified version of the image. Additionally, the solution generates a CloudFront domain name that provides cached access to the image handler API. There is limited use of CloudFront functions for consistency and cache hit rate purposes.
-
-## Default Architecture
-
-![Architecture Diagram (Default Architecture)](./default_architecture.png)
-
-## S3 Object Lambda Architecture
-
-![Architecture Diagram (S3 Object Lambda Architecture)](./object_lambda_architecture.png)
+- **Event-driven image processing**: Automatically processes images when uploaded to S3
+- **Multiple size generation**: Creates thumbnail, medium, and large sizes of each image
+- **Metadata storage**: Optional DynamoDB table to track image processing details
+- **REST API**: Optional API Gateway endpoints for direct upload and transformation
+- **CORS support**: Configure cross-origin resource sharing for web applications
+- **Serverless architecture**: No servers to manage, scales automatically
 
 
-# AWS CDK and Solutions Constructs
+## Prerequisites
 
-[AWS Cloud Development Kit (AWS CDK)](https://aws.amazon.com/cdk/) and [AWS Solutions Constructs](https://aws.amazon.com/solutions/constructs/) make it easier to consistently create well-architected infrastructure applications. All AWS Solutions Constructs are reviewed by AWS and use best practices established by the AWS Well-Architected Framework. This solution uses the following AWS Solutions Constructs:
+- AWS CLI installed and configured
+- Node.js 14.x or later
+- AWS CDK installed (`npm install -g aws-cdk`)
 
-- [aws-cloudfront-s3](https://docs.aws.amazon.com/solutions/latest/constructs/aws-cloudfront-s3.html)
-- [aws-cloudfront-apigateway-lambda](https://docs.aws.amazon.com/solutions/latest/constructs/aws-cloudfront-apigateway-lambda.html)
+## Deployment
 
-In addition to the AWS Solutions Constructs, the solution uses AWS CDK directly to create infrastructure resources.
+1. Clone this repository:
+   ```
+   git clone <repository-url>
+   cd serverless-image-processing
+   ```
 
-# Customizing the Solution
+2. Install dependencies:
+   ```
+   npm install
+   ```
 
-## Prerequisites for Customization
+3. Build the project:
+   ```
+   npm run build
+   ```
 
-- [AWS Command Line Interface](https://aws.amazon.com/cli/)
-- Node.js 20.x or later
+4. Deploy the solution:
+   ```bash
+   ./deployment/deploy-serverless-image-processor.sh --deploy
+   ```
 
-### 1. Clone the repository
+   During deployment, you'll be prompted for the following parameters:
+   - Enable API Gateway? (Yes/No)
+   - Enable CORS? (Yes/No) 
+   - CORS Origin (default: *)
+   - Enable DynamoDB metadata storage? (Yes/No)
+   - Log retention period in days
 
-```bash
-git clone https://github.com/aws-solutions/dynamic-image-transformation-for-amazon-cloudfront.git
-cd dynamic-image-transformation-for-amazon-cloudfront
-export MAIN_DIRECTORY=$PWD
+5. Note the outputs from the deployment:
+   - `SourceBucketOutput`: S3 bucket where original images should be uploaded
+   - `ProcessedBucketOutput`: S3 bucket where processed images are stored
+   - `ProcessedBucketURL`: URL to access processed images
+   - `MetadataTableOutput`: DynamoDB table name (if enabled)
+   - `ApiEndpoint`: API Gateway URL (if enabled)
+
+## Usage
+
+### Uploading Images via S3
+
+1. Upload images to the `/uploads/` folder in the source bucket:
+   ```
+   aws s3 cp your-image.jpg s3://your-source-bucket-name/uploads/
+   ```
+
+2. The Lambda function will automatically process the image and store transformed versions in the destination bucket with the following naming format:
+   - `processed/filename-thumb.jpg`: 100x100 thumbnail
+   - `processed/filename-medium.jpg`: 500x500 medium size
+   - `processed/filename-large.jpg`: 1024x1024 large size
+
+### Using the API (if enabled)
+
+#### Transform an image
+
+```
+POST /transform
+Content-Type: multipart/form-data
+
+file: <image-file>
+width: 300
+height: 200
 ```
 
+#### Get image metadata
 
-### 2. Unit Test
-
-After making changes, run unit tests to make sure added customization passes the tests:
-
-```bash
-cd $MAIN_DIRECTORY/deployment
-chmod +x run-unit-tests.sh && ./run-unit-tests.sh
+```
+GET /info/{image-id}
 ```
 
-### 3. Build and Deploy
+### CloudFront Access
+
+Access processed images through the CloudFront distribution using the following URL patterns:
+- Standard: `https://{CloudFront-Domain}/image/{bucket-name}/{key}`
+- With transformations: `https://{CloudFront-Domain}/image/{bucket-name}/{key}?width=300&height=300`
+- Thumbor style: `https://{CloudFront-Domain}/unsafe/500x500/filters:grayscale()/image.jpg`
+
+## Available Image Transformations
+
+The image handler supports the following transformations:
+
+| Transformation | Parameter | Example | Description |
+|---------------|-----------|---------|-------------|
+| Resize | `width`, `height` | `?width=300&height=200` | Resize the image to specified dimensions |
+| Crop | `crop=true` | `?width=300&height=200&crop=true` | Crop the image to specified dimensions |
+| Format | `format` | `?format=webp` | Convert image to a different format (jpg, png, webp, avif) |
+| Quality | `quality` | `?quality=80` | Set the output image quality (1-100) |
+| Grayscale | `grayscale=true` | `?grayscale=true` | Convert image to grayscale |
+| Watermark | `watermark=true` | `?watermark=true` | Apply the configured watermark |
+| Blur | `blur` | `?blur=5` | Apply Gaussian blur to the image |
+| Rotate | `rotate` | `?rotate=90` | Rotate the image by specified degrees |
+
+## Utility Classes
+
+The solution includes several utility classes to manage AWS resources:
+
+- **S3Operations**: Manages S3 interaction for image storage
+  - `storeProcessedImage()`: Save transformed images to S3
+  - `getImageMetadata()`: Retrieve image metadata from S3
+  - `updateAccessStats()`: Update image access statistics
+
+- **DbOperations**: Manages DynamoDB integration for metadata
+  - `storeImageMetadata()`: Store image metadata in DynamoDB
+  - `getImageMetadata()`: Retrieve image metadata
+  - `updateImageMetadata()`: Update existing metadata
+
+- **EnvConfig**: Environment configuration helper
+  - `getSourceBuckets()`: Get configured source buckets
+  - `getOutputBucket()`: Get processed images bucket
+  - `isCacheEnabled()`: Check if caching is enabled
+
+## Customization
+
+### Adding Additional Transforms
+
+To add custom image transformations, modify the `handleS3Event` function in `source/image-handler/index.ts`:
+
+1. Add your custom transform to the `transformations` array:
+   ```javascript
+   const transformations = [
+     { width: 100, height: 100, suffix: 'thumb' },
+     { width: 500, height: 500, suffix: 'medium' },
+     { width: 1024, height: 1024, suffix: 'large' },
+     // Add your custom transform here
+     { width: 200, height: 200, grayscale: true, suffix: 'bw' },
+   ];
+   ```
+
+2. Deploy your changes:
+   ```bash
+   ./deployment/deploy-serverless-image-processor.sh --deploy
+   ```
+
+## Monitoring and Logs
+
+- **CloudWatch Logs**: Monitor Lambda function execution, errors, and performance
+- **CloudWatch Metrics**: Track function invocations, duration, and errors
+- **DynamoDB**: Track image metadata and access statistics
+- **CloudFront**: Monitor cache hit/miss metrics and content delivery performance
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Image Processing Failures**
+   - Check CloudWatch logs for specific error messages
+   - Verify that the Sharp library is correctly installed with all dependencies
+   - Ensure the Lambda function has sufficient memory and timeout
+
+2. **Access Denied Errors**
+   - Verify IAM roles and policies are correctly configured
+   - Check S3 bucket policies and CORS settings
+   - Ensure CloudFront has proper origin access identity configured
+
+3. **Performance Issues**
+   - Increase Lambda memory allocation in `config.env`
+   - Optimize image processing parameters
+   - Adjust CloudFront caching behavior
+
+## Cleanup
+
+To remove all deployed resources, you can use the cleanup script:
+
 ```bash
-cd $MAIN_DIRECTORY/source/constructs
-npm run clean:install
-overrideWarningsEnabled=false npx cdk bootstrap --profile <PROFILE_NAME>
-overrideWarningsEnabled=false npx cdk deploy\
- --parameters DeployDemoUIParameter=Yes\
-  --parameters SourceBucketsParameter=<MY_BUCKET>\
-   --profile <PROFILE_NAME>
+./deployment/deploy-serverless-image-processor.sh --destroy
 ```
 
-_Note:_
-- **MY_BUCKET**: name of an existing bucket or the list of comma-separated bucket names in your account
-- **PROFILE_NAME**: name of an AWS CLI profile that has appropriate credentials for deploying in your preferred region
+Or manually using the AWS Management Console or AWS CLI:
 
-# Collection of operational metrics
+1. Delete Lambda functions:
+```bash
+aws lambda delete-function --function-name image-handler-function
+```
 
-This solution collects anonymous operational metrics to help AWS improve the quality and features of the solution. For more information, including how to disable this capability, please see the [implementation guide](https://docs.aws.amazon.com/solutions/latest/serverless-image-handler/reference.html#anonymized-data-collection).
+2. Delete CloudWatch Log Groups:
+```bash
+aws logs delete-log-group --log-group-name /aws/lambda/image-handler-function
+```
 
-# External Contributors
+3. Delete S3 buckets (processed images bucket):
+```bash
+aws s3 rm s3://your-processed-bucket-name --recursive
+aws s3 rb s3://your-processed-bucket-name
+```
 
-- [@leviwilson](https://github.com/leviwilson) for [#117](https://github.com/aws-solutions/serverless-image-handler/pull/117)
-- [@rpong](https://github.com/rpong) for [#130](https://github.com/aws-solutions/serverless-image-handler/pull/130)
-- [@harriswong](https://github.com/harriswong) for [#138](https://github.com/aws-solutions/serverless-image-handler/pull/138)
-- [@ganey](https://github.com/ganey) for [#139](https://github.com/aws-solutions/serverless-image-handler/pull/139)
-- [@browniebroke](https://github.com/browniebroke) for [#151](https://github.com/aws-solutions/serverless-image-handler/pull/151), [#152](https://github.com/aws-solutions/serverless-image-handler/pull/152)
-- [@john-shaffer](https://github.com/john-shaffer) for [#158](https://github.com/aws-solutions/serverless-image-handler/pull/158)
-- [@toredash](https://github.com/toredash) for [#174](https://github.com/aws-solutions/serverless-image-handler/pull/174), [#195](https://github.com/aws-solutions/serverless-image-handler/pull/195)
-- [@lith-imad](https://github.com/lith-imad) for [#194](https://github.com/aws-solutions/serverless-image-handler/pull/194)
-- [@pch](https://github.com/pch) for [#227](https://github.com/aws-solutions/serverless-image-handler/pull/227)
-- [@atrope](https://github.com/atrope) for [#201](https://github.com/aws-solutions/serverless-image-handler/pull/201), [#202](https://github.com/aws-solutions/serverless-image-handler/pull/202)
-- [@bretto36](https://github.com/bretto36) for [#182](https://github.com/aws-solutions/serverless-image-handler/pull/182)
-- [@makoncline](https://github.com/makoncline) for [#255](https://github.com/aws-solutions/serverless-image-handler/pull/255)
-- [@frankenbubble](https://github.com/frankenbubble) for [#302](https://github.com/aws-solutions/serverless-image-handler/pull/302)
-- [@guidev](https://github.com/guidev) for [#309](https://github.com/aws-solutions/serverless-image-handler/pull/309)
-- [@njtmead](https://github.com/njtmead) for [#276](https://github.com/aws-solutions/serverless-image-handler/pull/276)
-- [@StaymanHou](https://github.com/StaymanHou) for [#320](https://github.com/aws-solutions/serverless-image-handler/pull/320)
-- [@alenpaulvarghese](https://github.com/alenpaulvarghese) for [#392](https://github.com/aws-solutions/serverless-image-handler/pull/392)
-- [@Fjool](https://github.com/Fjool) for [#489](https://github.com/aws-solutions/serverless-image-handler/pull/489)
-- [@fvsnippets](https://github.com/fvsnippets) for [#373](https://github.com/aws-solutions/serverless-image-handler/pull/373), [#380](https://github.com/aws-solutions/serverless-image-handler/pull/380)
-- [@ccchapman](https://github.com/ccchapman) for [#490](https://github.com/aws-solutions/serverless-image-handler/pull/490)
-- [@bennet-esyoil][https://github.com/bennet-esyoil] for [#521](https://github.com/aws-solutions/serverless-image-handler/pull/521)
-- [@vaniyokk][https://github.com/vaniyokk] for [#511](https://github.com/aws-solutions/serverless-image-handler/pull/511)
-- [@ericbuehl](https://github.com/ericbuehl) for [#463](https://github.com/aws-solutions/serverless-image-handler/pull/463)
-- [@fvsnippets](https://github.com/fvsnippets) for [#372](https://github.com/aws-solutions/serverless-image-handler/pull/372)
-- [@markuscolourbox](https://github.com/markuscolourbox) for [#349](https://github.com/aws-solutions/serverless-image-handler/pull/349)
-- [@madhubalaji](https://github.com/madhubalaji) for [#476](https://github.com/aws-solutions/serverless-image-handler/pull/476)
-- [@nicolasbuch](https://github.com/nicolasbuch) for [#569](https://github.com/aws-solutions/serverless-image-handler/pull/569)
-- [@mrnonz](https://github.com/mrnonz) for [#567](https://github.com/aws-solutions/serverless-image-handler/pull/567)
-- [@ilich](https://github.com/ilich) for [#574](https://github.com/aws-solutions/serverless-image-handler/pull/574)
+4. Delete IAM roles and policies:
+```bash
+aws iam list-roles --query "Roles[?contains(RoleName, 'image-processor')].RoleName" --output text | xargs -I {} aws iam delete-role --role-name {}
+```
 
-# License
+5. Delete API Gateway REST APIs:
+```bash
+# First list the APIs
+aws apigateway get-rest-apis
+# Then delete the specific API
+aws apigateway delete-rest-api --rest-api-id <api-id>
+```
+
+6. Delete CloudFront Distribution:
+```bash
+# First disable the distribution (required before deletion)
+aws cloudfront update-distribution --id <distribution-id> --if-match <etag> --distribution-config '{"Enabled":false}'
+# Then delete it (may take time to complete)
+aws cloudfront delete-distribution --id <distribution-id> --if-match <etag>
+```
+
+7. Delete DynamoDB table:
+```bash
+aws dynamodb delete-table --table-name image-metadata
+```
+
+**Note**: The source S3 bucket is retained by default to prevent accidental deletion of your original images. To delete it manually, use the AWS Console or AWS CLI.
+
+## Security Considerations
+
+### Best Practices Implemented
+
+- **IAM Roles**: Least privilege permissions for Lambda functions and other services
+- **S3 Bucket Policies**: Restrict access to authorized users and services only
+- **Image URL Signing**: Optional signing of URLs for private content
+- **Input Validation**: Thorough validation of all user inputs to prevent security issues
+- **Encryption**: Data encryption at rest and in transit
+
+### Additional Security Notes
+
+- The processed image bucket allows public read access to enable serving images directly from S3
+- Access to the API Gateway is not authenticated by default - add authentication as needed
+- Consider adding a CloudFront distribution in front of the processed image bucket for improved performance and security
+
+## Learning Outcomes
+
+- Building event-driven architectures with Lambda and S3 triggers
+- Understanding cost-efficient, auto-scaling serverless applications
+- Enhancing security using IAM roles and S3 bucket policies
+
+## License
 
 Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.   
 SPDX-License-Identifier: Apache-2.0

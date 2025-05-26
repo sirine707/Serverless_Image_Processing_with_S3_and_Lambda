@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "target": "es6",
+    "target": "es2017",
     "module": "commonjs",
     "moduleResolution": "node",
     "outDir": "dist",
@@ -8,7 +8,10 @@
     "esModuleInterop": true,
     "experimentalDecorators": true,
     "sourceMap": true,
-    "types": ["node", "@types/jest"]
+    "types": ["node", "@types/jest"],
+    "lib": ["es2017", "dom"],
+    "strict": false,
+    "resolveJsonModule": true
   },
   "include": ["**/*.ts"],
   "exclude": ["package", "dist", "**/*.map"]
