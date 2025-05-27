@@ -1,0 +1,45 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "AllowLambdaAccess",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "${LambdaRoleARN}"
+            },
+            "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:ListBucket"
+            ],
+            "Resource": [
+                "arn:aws:s3:::${BucketName}",
+                "arn:aws:s3:::${BucketName}/*"
+            ]
+        },
+        {
+            "Sid": "DenyUnencryptedObjectUploads",
+            "Effect": "Deny",
+            "Principal": "*",
+            "Action": "s3:PutObject",
+            "Resource": "arn:aws:s3:::${BucketName}/*",
+            "Condition": {
+                "StringNotEquals": {
+                    "s3:x-amz-server-side-encryption": "AES256"
+                }
+            }
+        },
+        {
+            "Sid": "DenyInsecureConnections",
+            "Effect": "Deny",
+            "Principal": "*",
+            "Action": "s3:*",
+            "Resource": "arn:aws:s3:::${BucketName}/*",
+            "Condition": {
+                "Bool": {
+                    "aws:SecureTransport": "false"
+                }
+            }
+        }
+    ]
+}

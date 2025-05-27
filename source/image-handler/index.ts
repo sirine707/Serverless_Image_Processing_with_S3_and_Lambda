@@ -117,8 +117,105 @@ async function handleS3Event(event: S3Event): Promise<void> {
     throw new Error("OUTPUT_BUCKET environment variable not set");
   }
 
+  // Define standard transformations to apply to all uploaded images
+  const transformations = [
+    { width: 100, height: 100, suffix: 'thumb' },
+    { width: 500, height: 500, suffix: 'medium' },
+    { width: 1024, height: 1024, suffix: 'large' }
+  ];
+
   for (const record of event.Records) {
     try {
+      const bucket = record.s3.bucket.name;
+      const key = decodeURIComponent(record.s3.object.key.replace(/\+/g, ' '));
+
+      console.info(`Processing image from ${bucket}/${key}`);
+
+      // Skip non-image files
+      const fileExt = key.toLowerCase().substring(key.lastIndexOf('.'));
+      if (!IMAGE_FORMATS.includes(fileExt)) {
+        console.info(`Skipping non-image file: ${key}`);
+        continue;
+      }
+
+      // Get the image from the source bucket
+      const originalImage = await s3Client.getObject({
+        Bucket: bucket,
+        Key: key
+      }).promise();
+
+      const imageHandler = new ImageHandler(s3Client, secretProvider);
+      const filename = key.substring(key.lastIndexOf('/') + 1, key.lastIndexOf('.'));
+
+      // Process each transformation
+      for (const transform of transformations) {
+        try {
+          const outputKey = `processed/${filename}-${transform.suffix}${fileExt}`;
+
+          // Create a mock request object that the ImageHandler can process
+          const imageRequest = new ImageRequest({
+            requestType: RequestTypes.DEFAULT,
+            bucket: bucket,
+            key: key,
+            outputBucket: OUTPUT_BUCKET,
+            outputKey: outputKey,
+            edits: {
+              resize: {
+                width: transform.width,
+                height: transform.height,
+                fit: 'cover'
+              }
+            }
+          });
+
+          // Apply watermark if enabled
+          if (ENABLE_WATERMARK) {
+            imageRequest.edits.overlayWith = {
+              text: WATERMARK_TEXT,
+              font: 'Arial',
+              size: Math.floor(transform.width * 0.05), // Scale text size based on image width
+              position: 'center'
+            };
+          }
+
+          // Process the image
+          const processedImage = await imageHandler.process(imageRequest);
+
+          // Store processed image
+          await s3Client.putObject({
+            Body: processedImage.Body,
+            Bucket: OUTPUT_BUCKET,
+            Key: outputKey,
+            ContentType: processedImage.ContentType,
+            Metadata: {
+              'original-key': key,
+              'transformation': JSON.stringify(transform)
+            }
+          }).promise();
+
+          console.info(`Successfully processed ${outputKey}`);
+
+          // Store metadata if DynamoDB is enabled
+          if (process.env.ENABLE_DYNAMODB === 'Yes') {
+            await dynamoDbClient.put({
+              TableName: IMAGE_METADATA_TABLE,
+              Item: {
+                imageId: outputKey,
+                sourceBucket: bucket,
+                sourceKey: key,
+                transformType: transform.suffix,
+                createdAt: new Date().toISOString(),
+                fileSize: processedImage.Body.length,
+                fileType: processedImage.ContentType
+              }
+            }).promise();
+          }
+        } catch (transformError) {
+          console.error(`Error processing transformation ${transform.suffix} for ${key}:`, transformError);
+          // Continue with other transformations
+        }
+      }
+    } catch (err) {
       const startTime = Date.now();
       const bucket = record.s3.bucket.name;
       const key = decodeURIComponent(record.s3.object.key.replace(/\+/g, " "));

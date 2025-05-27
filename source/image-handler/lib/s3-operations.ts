@@ -41,12 +41,19 @@ export class S3Operations {
         buffer: Buffer,
         metadata?: Partial<ImageMetadata>
     ): Promise<S3.ManagedUpload.SendData> {
+        const startTime = Date.now();
         const params: S3.PutObjectRequest = {
             Bucket: this.outputBucket,
             Key: key,
             Body: buffer,
             ContentType: contentType,
-            CacheControl: "max-age=31536000", // 1 year cache
+            CacheControl: "max-age=31536000", // 1 year cache,
+            Metadata: {
+                'processed': 'true',
+                'processing-time': startTime.toString(),
+                'file-size': buffer.length.toString(),
+                ...(metadata && { 'source-metadata': JSON.stringify(metadata) })
+            },
         };
 
         try {

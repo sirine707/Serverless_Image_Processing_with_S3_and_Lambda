@@ -188,6 +188,171 @@ To add custom image transformations, modify the `handleS3Event` function in `sou
 - **DynamoDB**: Track image metadata and access statistics
 - **CloudFront**: Monitor cache hit/miss metrics and content delivery performance
 
+## Project Structure
+
+This project is organized with the following directory structure to help contributors understand and navigate the codebase:
+
+```
+serverless-image-processing/
+│
+├── architecture.png              # Architecture diagram
+├── README.md                     # Main project documentation
+│
+├── deployment/                   # Deployment-related assets
+│   ├── config.env                # Configuration settings for deployment
+│   ├── deploy-serverless-image-processor.sh  # Main deployment script
+│   ├── manifest.json             # Deployment parameters and metadata
+│   └── run-unit-tests.sh         # Script to run unit tests
+│
+└── source/                       # Source code
+    ├── package.json              # Project dependencies
+    │
+    └── image-handler/            # Image handler Lambda function
+        ├── image-handler.ts      # Core image processing logic
+        ├── image-request.ts      # Image request handler
+        ├── index.ts              # Lambda function entry point
+        ├── query-param-mapper.ts # Maps query parameters to image operations
+        ├── secret-provider.ts    # Manages secret retrieval
+        ├── thumbor-mapper.ts     # Support for Thumbor-style URLs
+        ├── upload-handler.ts     # Handles image uploads
+        ├── tsconfig.json         # TypeScript configuration
+        │
+        ├── cloudfront-function-handlers/  # CloudFront function handler scripts
+        │   ├── apig-request-modifier.js
+        │   ├── ol-request-modifier.js
+        │   └── ol-response-modifier.js
+        │
+        ├── infrastructure/       # Infrastructure as code templates
+        │   ├── bucket-policy.json # S3 bucket policy template
+        │   └── template.yaml     # CloudFormation/SAM template
+        │
+        └── lib/                  # Library & utility code
+            ├── constants.ts      # Constant values
+            ├── db-operations.ts  # Database operations
+            ├── enums.ts          # Enumeration types
+            ├── env-config.ts     # Environment configuration helpers
+            ├── interfaces.ts     # TypeScript interfaces
+            ├── metadata.ts       # Image metadata handling
+            ├── s3-operations.ts  # S3 operations
+            └── types.ts          # TypeScript type definitions
+```
+
+## How to Run the Project
+
+Follow these steps to build, deploy, and run the serverless image processing project:
+
+### 1. Prerequisites Setup
+
+Ensure you have the following prerequisites installed:
+
+```bash
+# Check AWS CLI installation
+aws --version
+
+# Verify Node.js version (18.x recommended)
+node --version
+
+# Install AWS CDK globally if not installed
+npm install -g aws-cdk
+cdk --version
+
+# Install TypeScript globally if needed
+npm install -g typescript
+tsc --version
+```
+
+### 2. Clone and Configure the Project
+
+```bash
+# Clone the repository
+git clone https://github.com/sirine707/Serverless_Image_Processing_with_S3_and_Lambda.git
+cd Serverless_Image_Processing_with_S3_and_Lambda
+
+# Configure AWS credentials if not already done
+aws configure
+```
+
+### 3. Install Dependencies
+
+```bash
+# Install root dependencies
+npm install
+
+# Navigate to the image-handler directory and install its dependencies
+cd source/image-handler
+npm install
+```
+
+### 4. Build the Project
+
+```bash
+# From the image-handler directory
+npm run build
+
+# If there's no specific build script, compile TypeScript directly
+tsc -p tsconfig.json
+```
+
+### 5. Configure Deployment Parameters
+
+Edit the configuration file to match your requirements:
+
+```bash
+# Edit the configuration file from the project root
+nano deployment/config.env
+```
+
+Key parameters to consider:
+- `ENABLE_DYNAMODB`: Set to "true" to enable DynamoDB metadata storage
+- `ENABLE_CORS`: Set to "true" to enable CORS support
+- `CORS_ORIGIN`: Configure allowed origins (default: "*")
+- `MEMORY_SIZE`: Lambda memory allocation in MB (default: 1024)
+- `TIMEOUT`: Lambda timeout in seconds (default: 30)
+- `CACHE_CONTROL_MAX_AGE`: CloudFront cache duration in seconds
+
+### 6. Deploy the Solution
+
+```bash
+# Navigate to the deployment directory from the project root
+cd deployment
+
+# Make the deployment script executable
+chmod +x deploy-serverless-image-processor.sh
+
+# Deploy the solution
+./deploy-serverless-image-processor.sh --deploy
+```
+
+### 7. Test the Solution
+
+After deployment is complete, note the output values and test the solution:
+
+```bash
+# Upload a test image to the source bucket
+aws s3 cp path/to/test-image.jpg s3://your-source-bucket/uploads/
+
+# List processed images in the output bucket
+aws s3 ls s3://your-output-bucket/processed/
+
+# Test the API Gateway endpoint (if enabled)
+curl -X GET "https://your-api-endpoint/image/your-source-bucket/uploads/test-image.jpg?width=300&height=200"
+```
+
+### 8. Monitor Logs and Performance
+
+```bash
+# View CloudWatch logs for the Lambda function
+aws logs tail /aws/lambda/image-handler-function
+```
+
+### 9. Clean Up Resources
+
+```bash
+# When finished, clean up all resources
+cd deployment
+./deploy-serverless-image-processor.sh --destroy
+```
+
 ## Troubleshooting
 
 ### Common Issues

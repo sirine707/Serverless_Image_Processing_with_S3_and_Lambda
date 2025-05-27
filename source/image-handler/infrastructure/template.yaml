@@ -83,6 +83,7 @@ Resources:
   # S3 Buckets
   SourceBucket:
     Type: AWS::S3::Bucket
+    DependsOn: LambdaPermissionForS3
     Properties:
       BucketEncryption:
         ServerSideEncryptionConfiguration:
@@ -106,6 +107,50 @@ Resources:
       LoggingConfiguration:
         DestinationBucketName: !Ref S3AccessLogsBucket
         LogFilePrefix: source-bucket-logs/
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: 's3:ObjectCreated:*'
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: 'uploads/'
+            Function: !GetAtt ImageHandlerFunction.Arn
+                
+  SourceBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DependsOn: [SourceBucket, ImageHandlerRole]
+    Properties:
+      Bucket: !Ref SourceBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowLambdaAccess
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt ImageHandlerRole.Arn
+            Action:
+              - s3:GetObject
+              - s3:ListBucket
+            Resource:
+              - !Sub "arn:aws:s3:::${SourceBucket}"
+              - !Sub "arn:aws:s3:::${SourceBucket}/*"
+          - Sid: DenyUnencryptedObjectUploads
+            Effect: Deny
+            Principal: "*"
+            Action: s3:PutObject
+            Resource: !Sub "arn:aws:s3:::${SourceBucket}/*"
+            Condition:
+              StringNotEquals:
+                "s3:x-amz-server-side-encryption": "AES256"
+          - Sid: DenyInsecureConnections
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource: !Sub "arn:aws:s3:::${SourceBucket}/*"
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
 
   OutputBucket:
     Type: AWS::S3::Bucket
@@ -137,6 +182,50 @@ Resources:
       LoggingConfiguration:
         DestinationBucketName: !Ref S3AccessLogsBucket
         LogFilePrefix: output-bucket-logs/
+        
+  OutputBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DependsOn: [OutputBucket, ImageHandlerRole]
+    Properties:
+      Bucket: !Ref OutputBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowLambdaAccess
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt ImageHandlerRole.Arn
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:ListBucket
+            Resource:
+              - !Sub "arn:aws:s3:::${OutputBucket}"
+              - !Sub "arn:aws:s3:::${OutputBucket}/*"
+          - Sid: AllowPublicRead
+            Effect: Allow
+            Principal: "*"
+            Action: s3:GetObject
+            Resource: !Sub "arn:aws:s3:::${OutputBucket}/*"
+            Condition:
+              StringEquals:
+                "s3:ExistingObjectTag/public": "true"
+          - Sid: DenyUnencryptedObjectUploads
+            Effect: Deny
+            Principal: "*"
+            Action: s3:PutObject
+            Resource: !Sub "arn:aws:s3:::${OutputBucket}/*"
+            Condition:
+              StringNotEquals:
+                "s3:x-amz-server-side-encryption": "AES256"
+          - Sid: DenyInsecureConnections
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource: !Sub "arn:aws:s3:::${OutputBucket}/*"
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
 
   S3AccessLogsBucket:
     Type: AWS::S3::Bucket
@@ -247,6 +336,16 @@ Resources:
           DEFAULT_FALLBACK_IMAGE_BUCKET: !If [EnableDefaultFallbackImageCondition, !Ref DefaultFallbackImageS3Bucket, '']
           DEFAULT_FALLBACK_IMAGE_KEY: !If [EnableDefaultFallbackImageCondition, !Ref DefaultFallbackImageS3Key, '']
 
+  # Lambda Permission for S3
+  LambdaPermissionForS3:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt ImageHandlerFunction.Arn
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub "arn:aws:s3:::${SourceBucket}"
+      SourceAccount: !Ref "AWS::AccountId"
+      
   # CloudFront Distribution
   CloudfrontDistribution:
     Type: AWS::CloudFront::Distribution
